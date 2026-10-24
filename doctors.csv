@@ -1,0 +1,21 @@
+slot_id,name,name_zh,department,department_zh,weekday,session,registration_fee,available
+1,Dr. Lin Mei-Hua,林美華醫師,family medicine,家醫科,Mon,morning,50,1
+2,Dr. Lin Mei-Hua,林美華醫師,family medicine,家醫科,Wed,afternoon,50,1
+3,Dr. Lin Mei-Hua,林美華醫師,family medicine,家醫科,Fri,evening,50,1
+4,Dr. Lin Mei-Hua,林美華醫師,family medicine,家醫科,Sat,morning,50,0
+5,Dr. Chen Wei-Ming,陳偉明醫師,pediatrics,小兒科,Mon,afternoon,80,1
+6,Dr. Chen Wei-Ming,陳偉明醫師,pediatrics,小兒科,Tue,morning,80,1
+7,Dr. Chen Wei-Ming,陳偉明醫師,pediatrics,小兒科,Thu,evening,80,1
+8,Dr. Chen Wei-Ming,陳偉明醫師,pediatrics,小兒科,Sat,morning,80,1
+9,Dr. Wang Zhi-Hao,王志豪醫師,internal medicine,內科,Tue,morning,100,1
+10,Dr. Wang Zhi-Hao,王志豪醫師,internal medicine,內科,Wed,afternoon,100,1
+11,Dr. Wang Zhi-Hao,王志豪醫師,internal medicine,內科,Thu,afternoon,100,1
+12,Dr. Wang Zhi-Hao,王志豪醫師,internal medicine,內科,Fri,morning,100,0
+13,Dr. Huang Shu-Fen,黃淑芬醫師,dermatology,皮膚科,Tue,evening,150,1
+14,Dr. Huang Shu-Fen,黃淑芬醫師,dermatology,皮膚科,Wed,morning,150,1
+15,Dr. Huang Shu-Fen,黃淑芬醫師,dermatology,皮膚科,Fri,afternoon,150,1
+16,Dr. Huang Shu-Fen,黃淑芬醫師,dermatology,皮膚科,Sat,afternoon,150,1
+17,Dr. Chang Yi-Jun,張益軍醫師,ENT,耳鼻喉科,Mon,evening,100,1
+18,Dr. Chang Yi-Jun,張益軍醫師,ENT,耳鼻喉科,Wed,evening,100,1
+19,Dr. Chang Yi-Jun,張益軍醫師,ENT,耳鼻喉科,Thu,morning,100,1
+20,Dr. Chang Yi-Jun,張益軍醫師,ENT,耳鼻喉科,Sat,morning,100,1
