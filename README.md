@@ -2,7 +2,6 @@
 
 A Gradio chat agent for a small family clinic in Kaohsiung. It answers clinic questions, looks up the doctor schedule, calculates visit fees, and hands complaints or unknown questions to the front desk. Chinese and English are both supported.
 
-![screenshot](screenshots/chat.png)  <!-- TODO: add a screenshot that shows the tool trace -->
 
 ## What it does
 
