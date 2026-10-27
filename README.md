@@ -1,8 +1,7 @@
-# Sunrise Community Clinic (晨光社區診所) — Customer Service Agent (Tool Calling + RAG)
+# Sunrise Community Clinic  — Customer Service Agent (Tool Calling + RAG)
 
 A Gradio chat agent for a small family clinic in Kaohsiung. It answers clinic questions, looks up the doctor schedule, calculates visit fees, **searches the clinic's visit rules with RAG**, and hands complaints or unknown questions to the front desk. Chinese and English are both supported. All clinic data is made up for practice.
 
-![screenshot](screenshots/chat.png)  <!-- TODO: add a screenshot that shows the tool trace -->
 
 ## What it does
 
