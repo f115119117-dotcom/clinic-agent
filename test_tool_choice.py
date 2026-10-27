@@ -30,6 +30,13 @@ TEST_SET = [
     ("I am 70 years old. How much is it to see Dr. Wang?",                    {"calculate_visit_fee"}),
     ("我 5 歲的小孩要看小兒科，總共多少錢？",                                      {"calculate_visit_fee"}),
     ("How much is it for a 30-year-old and an 8-year-old to see Dr. Lin?",    {"calculate_visit_fee"}),
+    # visit rules (RAG)
+    ("I am 15 minutes late for my appointment. Can I still be seen?",        {"search_clinic_rules"}),
+    ("我發燒又咳嗽，到診所要注意什麼？",                                          {"search_clinic_rules"}),
+    ("How do I get a copy of my medical records?",                           {"search_clinic_rules"}),
+    ("診所可以進輪椅嗎？",                                                      {"search_clinic_rules"}),
+    ("如果颱風放假，診所有開嗎？",                                                {"search_clinic_rules"}),
+    ("Can I get a continuous prescription for my chronic condition?",        {"search_clinic_rules"}),
     # hand over to a person, not in the data
     ("I waited an hour and the nurse was rude. I want to speak to the manager.", {"transfer_to_human"}),
     ("Do you do COVID tests?",                                                {"transfer_to_human"}),

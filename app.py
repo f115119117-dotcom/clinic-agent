@@ -2,7 +2,8 @@
 
 Every question goes to the agent first. The agent decides which tool to use:
 clinic information and the doctor schedule come from a SQLite database, the code works out
-the visit fee, and anything the tools cannot answer is handed to a human.
+the visit fee, the clinic's visit rules are searched by meaning (RAG), and anything the tools
+cannot answer is handed to a human.
 The panel on the right shows which tools were called and what they returned.
 
 Run it with:  python app.py
@@ -16,6 +17,7 @@ from pathlib import Path
 import sqlite3
 
 import gradio as gr
+import numpy as np
 from openai import OpenAI
 from dotenv import load_dotenv
 
@@ -30,6 +32,13 @@ API_ENDPOINT = os.getenv("LLM_API_URL")
 CHAT_MODEL = os.getenv("MODEL_NAME")
 
 client = OpenAI(api_key=API_KEY, base_url=API_ENDPOINT, timeout=60.0)
+
+# RAG needs a second model, the embedding model. If its settings are empty,
+# we fall back to the chat server's URL and key (both models on the same server).
+EMBED_API_URL = os.getenv("EMBEDDING_API_URL") or API_ENDPOINT
+EMBED_API_KEY = os.getenv("EMBEDDING_API_KEY") or API_KEY
+EMBED_MODEL = os.getenv("EMBEDDING_MODEL_NAME")
+embed_client = OpenAI(api_key=EMBED_API_KEY, base_url=EMBED_API_URL, timeout=60.0)
 
 
 # ---------------------------------------------------------------------------
@@ -84,6 +93,53 @@ CLINIC_TOPICS = [r["topic"] for r in cursor.execute("SELECT topic FROM shop_info
 DEPARTMENTS = [r["department"] for r in cursor.execute("SELECT DISTINCT department FROM doctors ORDER BY slot_id")]
 SLOT_COUNT = cursor.execute("SELECT COUNT(*) AS n FROM doctors").fetchone()["n"]
 print(f"Ready: {len(CLINIC_TOPICS)} clinic topics, {SLOT_COUNT} doctor sessions.")
+
+
+# ---------------------------------------------------------------------------
+# 2b. RAG: the clinic's visit rules (clinic_rules.txt), searched by meaning
+# ---------------------------------------------------------------------------
+# A rule has conditions and exceptions, so it does not fit in table columns.
+# Step 1: cut the text into chunks (one "##" section = one chunk).
+# Step 2: turn every chunk into a vector (an embedding), once, when the program starts.
+# Step 3: for each question, find the chunks whose vectors are closest to the question's vector.
+def embed(texts):
+    """Turn a list of texts into vectors, one row per text."""
+    response = embed_client.embeddings.create(model=EMBED_MODEL, input=texts)
+    return np.array([item.embedding for item in response.data], dtype="float32")
+
+
+def load_chunks(path):
+    """Cut a text file into chunks: one '## heading' section = one chunk."""
+    text = Path(path).read_text(encoding="utf-8").replace("\r\n", "\n")
+    chunks = []
+    for part in text.split("\n## ")[1:]:          # the text before the first '## ' heading is skipped
+        title, _, body = part.partition("\n")
+        chunks.append({"title": title.strip(), "text": body.strip()})
+    return chunks
+
+
+RULE_CHUNKS = load_chunks(BASE_DIR / "clinic_rules.txt")
+MIN_SCORE = 0.45      # below this score the rules probably do not cover the question; tune it with your own test questions
+try:
+    CHUNK_VECTORS = embed([f"{c['title']}\n{c['text']}" for c in RULE_CHUNKS])     # phase A: once
+    print(f"Ready: {len(RULE_CHUNKS)} rule chunks embedded ({CHUNK_VECTORS.shape[1]} numbers each).")
+except Exception as error:                  # the app still works without the rule search
+    CHUNK_VECTORS = None
+    print(f"WARNING: could not embed the rule chunks, search_clinic_rules is off: {error}")
+
+
+def search_clinic_rules(question, k=2):
+    """Find the chunks of the clinic's visit rules closest in meaning to the question (phase B)."""
+    if CHUNK_VECTORS is None:
+        return {"found": False, "note": "The rule search is not available now."}
+    q = embed([question])[0]
+    scores = CHUNK_VECTORS @ q / (np.linalg.norm(CHUNK_VECTORS, axis=1) * np.linalg.norm(q))
+    best = [int(i) for i in np.argsort(scores)[::-1][:k] if scores[i] >= MIN_SCORE]
+    if not best:
+        return {"found": False, "note": "The clinic's visit rules do not cover this question."}
+    return {"found": True,
+            "chunks": [{"title": RULE_CHUNKS[i]["title"], "text": RULE_CHUNKS[i]["text"],
+                        "score": round(float(scores[i]), 3)} for i in best]}
 
 
 # ---------------------------------------------------------------------------
@@ -225,6 +281,7 @@ TOOL_FUNCTIONS = {
     "get_clinic_info": get_clinic_info,
     "search_doctors": search_doctors,
     "calculate_visit_fee": calculate_visit_fee,
+    "search_clinic_rules": search_clinic_rules,
     "transfer_to_human": transfer_to_human,
 }
 
@@ -279,6 +336,20 @@ TOOL_SPECS = [
                                                   "required": []}}},
                        "required": ["doctor", "patients"]}}},
     {"type": "function", "function": {
+        "name": "search_clinic_rules",
+        "description": ("Search the clinic's visit rules by meaning. Use it for rules with conditions or exceptions: "
+                        "arriving late (遲到), fever or cough symptoms at the clinic (發燒咳嗽的就診流程), "
+                        "pediatric visits and the child health booklet (小兒科、兒童健康手冊), wheelchair and mobility access (輪椅、無障礙), "
+                        "copies of medical records and diagnosis certificates (病歷影本、診斷證明書), referral letters (轉診單), "
+                        "continuous prescriptions for chronic conditions (慢性病連續處方箋), lost and found (失物), "
+                        "privacy and photos (隱私、拍照), typhoon or bad weather closures (颱風停診). "
+                        "Do not use it for opening hours, fees, doctor schedules, or cancelling: those have their own tools. "
+                        "If it finds nothing, use transfer_to_human."),
+        "parameters": {"type": "object",
+                       "properties": {"question": {"type": "string",
+                                                   "description": "The customer's question, in the customer's own words."}},
+                       "required": ["question"]}}},
+    {"type": "function", "function": {
         "name": "transfer_to_human",
                 "description": ("Use this when the customer asks to speak to a person or a manager, makes a complaint, "
                                 "or asks about a service, test or fact of the clinic that no other tool can answer, "
@@ -294,14 +365,16 @@ RULES
 1. Answer only from tool results. Never answer from memory, and never invent anything: no doctors, times, fees or rules.
 2. Clinic questions (opening hours, address, phone, how to register, first visit, cancelling, payment, fee rules, parking, flu shots) -> get_clinic_info.
 3. Doctor and schedule questions (which doctor, which day, which department, is a session full) -> search_doctors.
-4. Use calculate_visit_fee for every fee total. Never add fees yourself. If you do not know the age or the patient type, ask before you call it.
-5. If a tool reports that nothing was found, say so plainly. Do not guess.
-6. Complaints, a request to speak to a person, or clinic questions no tool can answer (for example a service or a test that is not in the data) -> transfer_to_human.
-7. You cannot make or change appointments. Tell the patient to register at the front desk or by phone.
-8. Never give a diagnosis, medicine advice or any other medical advice. Use get_clinic_info with the topic medical_advice, and suggest seeing a doctor.
+4. Visit rules with conditions or exceptions (arriving late, fever or cough at the clinic, pediatric visit, wheelchair access, medical records, referral letter, continuous prescription, lost items, privacy, typhoon closure) -> search_clinic_rules.
+   Use only the chunks it returns, and end the answer with the chunk title, like this: (source: Late arrival). If it finds nothing, use transfer_to_human.
+5. Use calculate_visit_fee for every fee total. Never add fees yourself. If you do not know the age or the patient type, ask before you call it.
+6. If a tool reports that nothing was found, say so plainly. Do not guess.
+7. Complaints, a request to speak to a person, or clinic questions no tool can answer (for example a service or a test that is not in the data) -> transfer_to_human.
+8. You cannot make or change appointments. Tell the patient to register at the front desk or by phone.
+9. Never give a diagnosis, medicine advice or any other medical advice. Use get_clinic_info with the topic medical_advice, and suggest seeing a doctor.
    If the patient describes an emergency, use get_clinic_info with the topic emergency and tell them to call 119.
-9. Only talk about this clinic. Politely refuse other topics, such as the weather or homework.
-10. Answer in the customer's language: English, or Traditional Chinese if the customer writes in Chinese.
+10. Only talk about this clinic. Politely refuse other topics, such as the weather or homework.
+11. Answer in the customer's language: English, or Traditional Chinese if the customer writes in Chinese.
    Write doctor names in the language of the answer: English names in English, Chinese names (name_zh) in Chinese.
    Be polite, and use three sentences or less.
 """
@@ -370,7 +443,7 @@ def run_agent(chat_history):
 # 4. The Gradio page
 # ---------------------------------------------------------------------------
 GREETING = ("Hello! I am the online agent of Sunrise Community Clinic. "
-            "Ask me about our opening hours, the doctor schedule, or the cost of a visit.\n\n"
+            "Ask me about our opening hours, the doctor schedule, the cost of a visit, or our visit rules.\n\n"
             "您好！我是晨光社區診所的線上客服，用中文或英文問我都可以。")
 
 EMPTY_TRACE = "### Tools used\n\n(nothing yet)"
@@ -395,6 +468,13 @@ SAMPLE_GROUPS = {
         "My 5-year-old needs the pediatrician. How much is it?",
         "How much is it for a 30-year-old and an 8-year-old to see Dr. Lin?",
         "How much is it to see the dermatologist?",   # no age: the agent should ask
+    ],
+    "Visit rules (search_clinic_rules)": [
+        "I am 15 minutes late for my appointment. Can I still be seen?",
+        "I have a fever and a cough. Do I need to do anything when I arrive?",
+        "How do I get a copy of my medical records?",
+        "Can I use a wheelchair in the clinic?",
+        "What happens if there is a typhoon day off?",
     ],
     "Complaint, not in the data, not our job": [
         "I waited an hour and the nurse was rude. I want to speak to the manager.",
@@ -431,6 +511,13 @@ SAMPLE_GROUPS_ZH = {
         "我 30 歲，帶 8 歲的小孩一起看林醫師，總共多少錢？",
         "看皮膚科要多少錢？",                         # no age: the agent should ask
     ],
+    "看診規定（search_clinic_rules）": [
+        "我預約的時間會晚到 15 分鐘，還可以看診嗎？",
+        "我發燒又咳嗽，到診所要注意什麼？",
+        "要怎麼申請病歷影本？",
+        "診所可以進輪椅嗎？",
+        "颱風放假的時候診所有開嗎？",
+    ],
     "客訴、資料沒有、不是客服的事": [
         "我等了一個小時，護理師態度很差，我要找主任。",
         "你們有牙科嗎？",                             # not on the schedule
@@ -457,7 +544,12 @@ def format_trace(trace):
         lines.append("")
         lines.append(f"arguments: `{json.dumps(entry['arguments'], ensure_ascii=False)[:400]}`")
         lines.append("")
-        lines.append(f"result: `{json.dumps(entry['result'], ensure_ascii=False)[:700]}`")
+        result = entry["result"]
+        if entry["tool"] == "search_clinic_rules" and result.get("found"):
+            for chunk in result["chunks"]:            # show which chunks were found, and their scores
+                lines.append(f"- chunk **{chunk['title']}** (score {chunk['score']}): {chunk['text'][:160]}...")
+        else:
+            lines.append(f"result: `{json.dumps(result, ensure_ascii=False)[:700]}`")
         lines.append("")
     return "\n".join(lines)
 
@@ -497,7 +589,7 @@ with gr.Blocks(title="Sunrise Clinic Agent") as demo:
     gr.Markdown(
         "## Sunrise Community Clinic: customer service agent\n"
         "Every question goes to the agent. Clinic information and the doctor schedule come from a SQLite database, "
-        "the code works out the visit fee, and anything else goes to a human. "
+        "the visit rules are searched by meaning (RAG), the code works out the visit fee, and anything else goes to a human. "
         "The panel on the right shows which tool was used."
     )
 
